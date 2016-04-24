@@ -36,7 +36,7 @@ class Repo(QtCore.QObject):
             self.issues += [Issue(issue) for issue in page]
             page_count += 1
             page = issues_list.get_page(page_count)
-            self.issue_processed.commit()
+            self.issue_processed.emit()
 
     def read_cache(self):
         pass  # TODO: Implement cache
