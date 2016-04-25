@@ -10,7 +10,7 @@ import pyqtgraph as pg
 import numpy as np
 from scipy import interpolate
 
-from repo import Repo
+from repo import Repo, toUnix
 
 class TimeAxisItem(pg.AxisItem):
     def __ini__(self, *args, **kwargs):
@@ -18,7 +18,8 @@ class TimeAxisItem(pg.AxisItem):
 
     def tickStrings(self, values, scale, spacing):
         return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
-        
+
+monthseconds = 2678400
 
 class Window(QtGui.QWidget):
     def __init__(self):
@@ -37,12 +38,20 @@ class Window(QtGui.QWidget):
     def createPlots(self):
         self.layout = pg.GraphicsLayoutWidget(self)
         self.issuesPlot = self.layout.addPlot(row=0, col=0, title="Issues",
+                                              labels={'left': "Number of Issues", 'bottom': "Date"},
                                               axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.issuesPlot.disableAutoRange(axis=self.issuesPlot.getViewBox().XAxis)
+        today = toUnix(datetime.today())
+        self.issuesPlot.setXRange(today - monthseconds, today) # month in seconds
         self.issuesCurve = self.issuesPlot.plot()
         self.commitsPlot = self.layout.addPlot(row=1, col=0, title="Commits",
-                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+                                               labels={'left': "Number of Commits", 'bottom': "Date"},
+                                               axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.commitsPlot.disableAutoRange(axis=self.commitsPlot.getViewBox().XAxis)
         self.commitsBugsCurve = self.commitsPlot.plot()
         self.commitsFeaturesCurve = self.commitsPlot.plot()
+        self.iauto = False
+        self.cauto = False
 
     def createUI(self):
         self.repoEdit = QtGui.QLineEdit(self)
@@ -78,6 +87,9 @@ class Window(QtGui.QWidget):
         #sl = self.smoothLine(self.issuesData[0], self.issuesData[1])
         #self.issuesCurve.clear()
         self.issuesCurve.setData(x=self.repo.issuesData[0], y=self.repo.issuesData[1], pen='r')
+        if not self.iauto and self.repo.issuesData[0][-1] - self.repo.issuesData[0][0] > monthseconds:
+            self.issuesPlot.enableAutoRange(axis=self.issuesPlot.getViewBox().XAxis)
+            self.iauto = True
         #self.issuesCurve.setData(x=sl[0], y=sl[1], pen='r')
 
     def updateCommitPlot(self):
@@ -93,6 +105,9 @@ class Window(QtGui.QWidget):
         self.commitsFeaturesCurve.setData(x=self.repo.commitsData[0], y=y0, pen='b')
         #sy = self.smoothLine(self.commitsData[0], y0)
         #self.commitsFeaturesCurve.setData(x=sy[0], y=sy[1], pen='b')
+        if not self.cauto and self.repo.commitsData[0][-1] - self.repo.commitsData[0][0] > monthseconds:
+            self.commitsPlot.enableAutoRange(axis=self.commitsPlot.getViewBox().XAxis)
+            self.cauto = True
 
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)

@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from bisect import bisect_left
 
 from PyQt4 import QtCore
 #from PyQt5 import QtCore
@@ -8,6 +9,10 @@ from PyQt4 import QtCore
 bugsearch = re.compile(
     "(fix)|(bug)|(issue)|(mistake)|(incorrect)|(fault)|(defect)|(error)|(flaw)", re.IGNORECASE)
 
+
+unixDt = datetime(1970, 1, 1)
+def toUnix(time):
+    return (time - unixDt).total_seconds()
 
 # Sorts a list of lists by the first list in the set
 def sortByKey(data):
@@ -23,7 +28,6 @@ class Repo(QtCore.QObject):
         QtCore.QObject.__init__(self)
         self.name = _name
         
-        self.unixDt = datetime(1970, 1, 1)
         self.commitsData = [[], [], []]
         self.issuesData = [[], []]
         
@@ -69,7 +73,7 @@ class Repo(QtCore.QObject):
         while len(self.unprocessedCommits):
             block = self.unprocessedCommits.pop()
             for commit in block:
-                date = self.toUnix(commit.commitDate)
+                date = toUnix(commit.commitDate)
                 isBug = self.classifyCommitMessage(commit.message)
                 data[0].append(date)
                 if isBug:
@@ -110,18 +114,19 @@ class Repo(QtCore.QObject):
 
     def processIssues(self):
         data = [[], []]
+        closed = []
         while len(self.unprocessedIssues):
             block = self.unprocessedIssues.pop()
             for issue in block:
-                date = self.toUnix(issue.createdAt)
+                date = toUnix(issue.createdAt)
                 data[0].append(date)
                 data[1].append(1)
                 if issue.closedAt is not None:
-                    close = self.toUnix(issue.closedAt)
-                    data[0].append(close)
-                    data[1].append(-1)
-                    self.processedIssues.append(issue)
+                    close = toUnix(issue.closedAt)
+                    closed.append(close)
+                self.processedIssues.append(issue)
         data = sortByKey(data)
+        closed = sorted(closed)
         for i in range(1, len(data[0])):
             data[1][i] += data[1][i-1]
         total = data[1][-1]
@@ -129,10 +134,28 @@ class Repo(QtCore.QObject):
             self.issuesData[1][i] += total
         self.issuesData[0][0:0] = data[0]
         self.issuesData[1][0:0] = data[1]
+
+        #print(self.issuesData)
+        total = 0
+        for i in range(len(closed) - 1):
+            total -= 1
+            first = bisect_left(self.issuesData[0], closed[i])
+            val = self.issuesData[1][first-1]
+            self.issuesData[0].insert(first, closed[i])
+            self.issuesData[1].insert(first, val-1)
+            if i == len(closed) - 1:
+                second = len(self.issuesData[0])-1
+            else:
+                second = bisect_left(self.issuesData[0], closed[i+1])
+            for j in range(first, second):
+                self.issuesData[1][j] -= total
+        #print(self.issuesData)
+            
+            
+            
+        
         self.issueProcessed.emit()
 
-    def toUnix(self, time):
-        return (time - self.unixDt).total_seconds()
 
     def read_cache(self):
         pass  # TODO: Implement cache
