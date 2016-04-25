@@ -12,6 +12,13 @@ from scipy import interpolate
 
 from repo import Repo
 
+class TimeAxisItem(pg.AxisItem):
+    def __ini__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def tickStrings(self, values, scale, spacing):
+        return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
+        
 
 class Window(QtGui.QWidget):
     def __init__(self):
@@ -20,18 +27,22 @@ class Window(QtGui.QWidget):
         #pg.setConfigOption('background', 'w')
         #pg.setConfigOption('foreground', 'k')
 
-        #print(self.github.rate_limiting)
-        self.github = Github( )  # Need to put in authentication
+        self.github = Github()  # Need to put in authentication
 
+        print(self.github.rate_limiting)
         self.createPlots()
 
         self.createUI()
 
     def createPlots(self):
         self.layout = pg.GraphicsLayoutWidget(self)
-        self.issuesPlot = self.layout.addPlot(row=0, col=0)
+        self.issuesPlot = self.layout.addPlot(row=0, col=0, title="Issues",
+                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
         self.issuesCurve = self.issuesPlot.plot()
-        self.commitsPlot = self.layout.addPlot(row=1, col=0)
+        self.commitsPlot = self.layout.addPlot(row=1, col=0, title="Commits",
+                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.commitsBugsCurve = self.commitsPlot.plot()
+        self.commitsFeaturesCurve = self.commitsPlot.plot()
 
     def createUI(self):
         self.repoEdit = QtGui.QLineEdit(self)
@@ -59,48 +70,29 @@ class Window(QtGui.QWidget):
         print("Getting repo: ", self.repoEdit.text())
         self.repo = Repo(self.repoEdit.text(), self.github)
         print("Got data")
-        self.repo.issue_processed.connect(self.processIssuesData)
-        #self.processIssuesData()
-        #print("Process")
-        #self.updateIssuesPlot()
-        print("Plotted")
+        self.repo.issueProcessed.connect(self.updateIssuesPlot)
+        self.repo.commitProcessed.connect(self.updateCommitPlot)
 
-    def processIssuesData(self):
-        dates = {}
-        issues = self.repo.issues
-        if len(issues) == 0:
-            return
-        for issue in issues:
-            create = issue.created_at
-            if create in dates:
-                dates[create] += 1
-            else:
-                dates[create] = 1
-
-            close = issue.closed_at
-            if close is not None:
-                if close in dates:
-                    dates[close] -= 1
-                else:
-                    dates[close] = -1
-        #total = 0
-        unixDT = datetime(1970, 1, 1)
-        self.issuesData = [[], []]
-        for date in dates.items():
-            self.issuesData[0].append((date[0] - unixDT).total_seconds())
-            self.issuesData[1].append(date[1])
-        self.issuesData = [list(x) for x in zip(*sorted(zip(self.issuesData[0], self.issuesData[1]), key=lambda p: p[0]))]
-        for i in range(1, len(self.issuesData[1])):
-            self.issuesData[1][i] += self.issuesData[1][i - 1]
-        print("Process")
-        self.updateIssuesPlot()
-        print("Plotted")
 
     def updateIssuesPlot(self):
         #sl = self.smoothLine(self.issuesData[0], self.issuesData[1])
-        self.issuesCurve.clear()
-        self.issuesCurve.setData(x=self.issuesData[0], y=self.issuesData[1], pen='r')
+        #self.issuesCurve.clear()
+        self.issuesCurve.setData(x=self.repo.issuesData[0], y=self.repo.issuesData[1], pen='r')
         #self.issuesCurve.setData(x=sl[0], y=sl[1], pen='r')
+
+    def updateCommitPlot(self):
+        size = len(self.repo.commitsData[0])
+        #y0 = np.zeros(size)
+        #self.commitsPlot.plot(x=self.commitsData[0], y=y0)
+        #y0 = [y0[i] + self.commitsData[1][i] for i in range(size)]
+        y0 = self.repo.commitsData[1][:]
+        self.commitsBugsCurve.setData(x=self.repo.commitsData[0], y=y0, pen='r')
+        #sy = self.smoothLine(self.commitsData[0], y0)
+        #self.commitsBugsCurve.setData(x=sy[0], y=sy[1], pen='r')
+        y0 = [y0[i] + self.repo.commitsData[2][i] for i in range(size)]
+        self.commitsFeaturesCurve.setData(x=self.repo.commitsData[0], y=y0, pen='b')
+        #sy = self.smoothLine(self.commitsData[0], y0)
+        #self.commitsFeaturesCurve.setData(x=sy[0], y=sy[1], pen='b')
 
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
