@@ -2,6 +2,7 @@ import sys
 import csv
 import random
 import json
+import re
 from datetime import datetime
 
 from github import Github
@@ -12,6 +13,17 @@ from scipy import interpolate
 
 from repo import Repo, Issue, Commit
 
+bugsearch = re.compile(
+    "(fix)|(bug)|(issue)|(mistake)|(incorrect)|(fault)|(defect)|(error)|(flaw)", re.IGNORECASE)
+
+class TimeAxisItem(pg.AxisItem):
+    def __ini__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def tickStrings(self, values, scale, spacing):
+        return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
+        
+
 class Window(QtGui.QWidget):
     def __init__(self):
         super(Window, self).__init__()
@@ -19,7 +31,6 @@ class Window(QtGui.QWidget):
         #pg.setConfigOption('background', 'w')
         #pg.setConfigOption('foreground', 'k')
 
-        
         print(self.github.rate_limiting)
 
         self.createPlots()
@@ -28,11 +39,15 @@ class Window(QtGui.QWidget):
 
     def createPlots(self):
         self.layout = pg.GraphicsLayoutWidget(self)
-        self.issuesPlot = self.layout.addPlot(row=0, col=0)
+        self.issuesPlot = self.layout.addPlot(row=0, col=0, title="Issues",
+                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
         self.issuesCurve = self.issuesPlot.plot()
-        self.commitsPlot = self.layout.addPlot(row=1, col=0)
         
-
+        self.commitsPlot = self.layout.addPlot(row=1, col=0, title="Commits",
+                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.commitsBugsCurve = self.commitsPlot.plot()
+        self.commitsFeaturesCurve = self.commitsPlot.plot()
+        
     def createUI(self):
         self.repoEdit = QtGui.QLineEdit(self)
         self.repoStart = QtGui.QPushButton("Start", self)
@@ -63,7 +78,10 @@ class Window(QtGui.QWidget):
         print("Process")
         self.updateIssuesPlot()
         print("Plotted")
-
+        self.processCommitsData()
+        print("Process")
+        self.updateCommitsPlot()
+        print("Plotted")
 
     def processIssuesData(self):
         dates = {}
@@ -87,7 +105,7 @@ class Window(QtGui.QWidget):
         for date in dates.items():
             self.issuesData[0].append((date[0] - unixDT).total_seconds())
             self.issuesData[1].append(date[1])
-        self.issuesData = [list(x) for x in zip(*sorted(zip(self.issuesData[0], self.issuesData[1]), key=lambda p: p[0]))]
+        self.issuesData = self.sortByKey(self.issuesData)
         for i in range(1, len(self.issuesData[1])):
             self.issuesData[1][i] += self.issuesData[1][i-1]
 
@@ -97,11 +115,65 @@ class Window(QtGui.QWidget):
         self.issuesCurve.setData(x=self.issuesData[0], y=self.issuesData[1], pen='r')
         #self.issuesCurve.setData(x=sl[0], y=sl[1], pen='r')
 
+    def processCommitsData(self):
+        unixDt = datetime(1970, 1, 1)
+        self.commitsData = [[], [], []]
+        commits = self.repo.commits
+        for commit in commits:
+            date = (commit.commit_date - unixDt).total_seconds()
+            isBug = self.classifyCommitMessage(commit.message)
+            self.commitsData[0].append(date)
+            if isBug:
+                self.commitsData[1].append(1)
+                self.commitsData[2].append(0)
+            else:
+                self.commitsData[1].append(0)
+                self.commitsData[2].append(1)
+        self.commitsData = self.sortByKey(self.commitsData)
+        for i in range(1, len(self.commitsData[0])):
+            self.commitsData[1][i] += self.commitsData[1][i-1]
+            self.commitsData[2][i] += self.commitsData[2][i-1]
+
+        #print(self.commitsData[0])
+        #print(self.densify(self.commitsData[0], 10))
+
+    def classifyCommitMessage(self, message):
+        return bugsearch.search(message) != None
+
+    def updateCommitsPlot(self):
+        size = len(self.commitsData[0])
+        #y0 = np.zeros(size)
+        #self.commitsPlot.plot(x=self.commitsData[0], y=y0)
+        #y0 = [y0[i] + self.commitsData[1][i] for i in range(size)]
+        y0 = self.commitsData[1][:]
+        self.commitsBugsCurve.setData(x=self.commitsData[0], y=y0, pen='r')
+        #sy = self.smoothLine(self.commitsData[0], y0)
+        #self.commitsBugsCurve.setData(x=sy[0], y=sy[1], pen='r')
+        y0 = [y0[i] + self.commitsData[2][i] for i in range(size)]
+        self.commitsFeaturesCurve.setData(x=self.commitsData[0], y=y0, pen='b')
+        #sy = self.smoothLine(self.commitsData[0], y0)
+        #self.commitsFeaturesCurve.setData(x=sy[0], y=sy[1], pen='b')
+
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
-        x1 = np.linspace(min(x), max(x), num=len(x)*100)
+        #x1 = np.linspace(min(x), max(x), num=len(x)*100)
+        x1 = self.densify(x, 10)
         y1 = spline(x1)
         return (x1, y1)
+
+    def densify(self, x, d):
+        dx = []
+        for i in range(1, len(x)):
+            x0 = x[i-1]
+            x1 = x[i]
+            for n in range(d):
+                dx.append(x0 + (n*(x1 - x0)/d))
+        return dx
+            
+
+    # Sorts a list of lists by the first list in the set
+    def sortByKey(self, data):
+        return [list(x) for x in zip(*sorted(zip(*data), key=lambda p: p[0]))]
     
 
 def main():
