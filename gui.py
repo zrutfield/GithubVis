@@ -4,17 +4,23 @@ import random
 import json
 from datetime import datetime
 
+from github import Github
 from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 import numpy as np
 from scipy import interpolate
 
+from repo import Repo, Issue, Commit
+
 class Window(QtGui.QWidget):
     def __init__(self):
         super(Window, self).__init__()
 
-        pg.setConfigOption('background', 'w')
-        pg.setConfigOption('foreground', 'k')
+        #pg.setConfigOption('background', 'w')
+        #pg.setConfigOption('foreground', 'k')
+
+        
+        print(self.github.rate_limiting)
 
         self.createPlots()
         
@@ -50,7 +56,13 @@ class Window(QtGui.QWidget):
         self.setWindowTitle("GithubVis")
 
     def createRepo(self):
-        self.repo = Repo(self.repoEdit.getText())
+        print("Getting repo: ", self.repoEdit.text())
+        self.repo = Repo(self.repoEdit.text(), self.github)
+        print("Got data")
+        self.processIssuesData()
+        print("Process")
+        self.updateIssuesPlot()
+        print("Plotted")
 
 
     def processIssuesData(self):
@@ -69,25 +81,26 @@ class Window(QtGui.QWidget):
                     dates[close] -= 1
                 else:
                     dates[close] = -1
-        dates = list(dates)
-        print(dates)
-        sorted(dates, key=lambda d: d[0])
         total = 0
-        for date in dates:
-            total += date[1]
-            date[1] = total
-        self.issuesData = []
-        self.issuesData[0] = [d[0] for d in dates]
-        self.issuesData[1] = [d[1] for d in dates]
+        unixDT = datetime(1970, 1, 1)
+        self.issuesData = [[], []]
+        for date in dates.items():
+            self.issuesData[0].append((date[0] - unixDT).total_seconds())
+            self.issuesData[1].append(date[1])
+        self.issuesData = [list(x) for x in zip(*sorted(zip(self.issuesData[0], self.issuesData[1]), key=lambda p: p[0]))]
+        for i in range(1, len(self.issuesData[1])):
+            self.issuesData[1][i] += self.issuesData[1][i-1]
 
     def updateIssuesPlot(self):
-        sl = smoothLine(self.issuesData[0], self.issuesData[1])
-        self.issuesCurve.setData(x=sl[0], y=sl[1])
+        #print(self.issuesData)
+        sl = self.smoothLine(self.issuesData[0], self.issuesData[1])
+        self.issuesCurve.setData(x=self.issuesData[0], y=self.issuesData[1], pen='r')
+        #self.issuesCurve.setData(x=sl[0], y=sl[1], pen='r')
 
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
-        x1 = np.linspace(min(x), max(x), num=len(x)*10)
-        y1 = splint(x1)
+        x1 = np.linspace(min(x), max(x), num=len(x)*100)
+        y1 = spline(x1)
         return (x1, y1)
     
 
