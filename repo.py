@@ -2,6 +2,7 @@ import re
 from datetime import datetime
 from bisect import bisect_left
 
+from github import Github, GithubException
 from PyQt4 import QtCore
 #from PyQt5 import QtCore
 
@@ -35,7 +36,6 @@ class Repo(QtCore.QObject):
             self.readCache()  # If no github object is passed in, look in cache
         else:
             self.repo = _gh.get_repo(self.name)
-            #self.commits = [self.pull_commits(repo)
             self.unprocessedCommits = []
             self.unprocessedIssues = []
             self.processedCommits = []
@@ -59,7 +59,13 @@ class Repo(QtCore.QObject):
 
     def pullCommits(self):
         commitsList = self.repo.get_commits()
-        page = commitsList.get_page(self.commitPage)
+        try:
+            page = commitsList.get_page(self.commitPage)
+        except GithubException:
+            print("Unknown Repository")
+            self.commitTimer.stop()
+            return
+        
         if len(page) == 0:
             self.commitTimer.stop()
             return
@@ -103,7 +109,13 @@ class Repo(QtCore.QObject):
 
     def pullIssues(self):
         issuesList = self.repo.get_issues(state='all')
-        page = issuesList.get_page(self.issuePage)
+        try:
+            page = issuesList.get_page(self.issuePage)
+        except GithubException:
+            print("Unknown Repository")
+            self.issueTimer.stop()
+            return
+        
         if len(page) == 0:
             self.issueTimer.stop()
             return
