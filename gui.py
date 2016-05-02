@@ -81,7 +81,10 @@ class Window(QtGui.QWidget):
 
     def createRepo(self):
         print("Getting repo: ", self.repoEdit.text())
-        self.repo = Repo(self.repoEdit.text(), self.github)
+        #testDateSince1 = datetime(2016, 3, 18)
+        #testDateSince1 = datetime(2012, 5, 7)
+        #testDateUntil1 = datetime(2016, 3, 25)
+        self.repo = Repo(self.repoEdit.text(), _gh=self.github)
         print("Got data")
         self.repo.issueProcessed.connect(self.updateIssuesPlot)
         self.repo.commitProcessed.connect(self.updateCommitPlot)
@@ -89,7 +92,6 @@ class Window(QtGui.QWidget):
     def stopRepo(self):
         self.repo.issueTimer.stop()
         self.repo.commitTimer.stop()
-
 
     def updateIssuesPlot(self):
         #sl = self.smoothLine(self.issuesData[0], self.issuesData[1])
