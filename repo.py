@@ -67,16 +67,16 @@ class Repo(QtCore.QObject):
             self.issueTimer.start()
 
             self.milestoneTimer = QtCore.QTimer()
-            # self.milestoneTimer.setInterval(400)
-            # self.milestoneTimer.timeout.connect(self.pullMilestones)
-            # self.milestoneTimer.start()
+            self.milestoneTimer.setInterval(200)
+            self.milestoneTimer.timeout.connect(self.pullMilestones)
+            self.milestoneTimer.start()
 
             self.commitPulled.connect(self.processCommits)
             self.issuePulled.connect(self.processIssues)
 
     def pullCommits(self):
-        #commitsList = self.repo.get_commits(since=self.since, until=self.until)
-        commitsList = self.repo.get_commits()
+        commitsList = self.repo.get_commits(since=self.since, until=self.until)
+        #commitsList = self.repo.get_commits()
         try:
             page = commitsList.get_page(self.commitPage)
         except GithubException:
@@ -135,11 +135,15 @@ class Repo(QtCore.QObject):
             self.issueTimer.stop()
             return
         else:
+            processedPage = [Issue(issue) for issue in filter(lambda x: (
+                self.since is NotSet or x.created_at >= self.since), page)]
             #processedPage = [Issue(issue) for issue in filter(lambda x: (self.until is NotSet or x.created_at <= self.until) and (self.since is NotSet or x.created_at >= self.since), page)]
+            # if len(processedPage) == 0:
+            #    self.issuePage += 1
+            #    return
             #processedPage = [Issue(issue) for issue in page]
-            # self.unprocessedIssues.append(processedPage)
-            self.unprocessedIssues.append([Issue(issue) for issue in page])
-            print("Pulled issues page")
+            self.unprocessedIssues.append(processedPage)
+            #self.unprocessedIssues.append([Issue(issue) for issue in page])
             self.issuePulled.emit()
             self.issuePage += 1
 
@@ -207,8 +211,8 @@ class Commit(QtCore.QObject):
         self.message = commit.commit.message
         self.commitDate = commit.commit.committer.date
         self.lastModified = commit.last_modified
-        self.linesAdded = commit.stats.additions
-        self.linesRemoved = commit.stats.deletions
+        #self.linesAdded = commit.stats.additions
+        #self.linesRemoved = commit.stats.deletions
 
     def __str__(self):
         return "".join(["Commit(", str(self.committer), ", ", str(self.message), ", ",

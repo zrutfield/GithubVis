@@ -11,6 +11,7 @@ import numpy as np
 from scipy import interpolate
 
 from repo import Repo, toUnix
+from github.GithubObject import NotSet
 
 
 class TimeAxisItem(pg.AxisItem):
@@ -151,10 +152,13 @@ class Window(QtGui.QWidget):
 
     def createRepo(self):
         print("Getting repo: ", self.repoEdit.text())
-        # testDateSince1 = datetime(2016, 3, 18)
-        # testDateSince1 = datetime(2012, 5, 7)
-        # testDateUntil1 = datetime(2016, 3, 25)
-        self.repo = Repo(self.repoEdit.text(), _gh=self.github)
+        #testDateSince1 = datetime(2016, 3, 18)
+        #testDateSince1 = datetime(2012, 5, 7)
+        #testDateUntil1 = datetime(2016, 3, 25)
+        testDateSince1 = NotSet
+        testDateUntil1 = NotSet
+        self.repo = Repo(self.repoEdit.text(), _since=testDateSince1,
+                         _until=testDateUntil1, _gh=self.github)
 
         self.issuesPlot.changeData(self.repo.issuesData, ["Open Issues"])
         self.commitsPlot.changeData(self.repo.commitsData[0:3],
