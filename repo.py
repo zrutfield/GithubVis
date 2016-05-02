@@ -13,12 +13,17 @@ bugsearch = re.compile(
 
 
 unixDt = datetime(1970, 1, 1)
+
+
 def toUnix(time):
     return (time - unixDt).total_seconds()
 
 # Sorts a list of lists by the first list in the set
+
+
 def sortByKey(data):
     return [list(x) for x in zip(*sorted(zip(*data), key=lambda p: p[0]))]
+
 
 class Repo(QtCore.QObject):
     commitPulled = QtCore.pyqtSignal()
@@ -33,7 +38,7 @@ class Repo(QtCore.QObject):
         self.since = _since
         self.until = _until
 
-        self.commitsData = [[], [], []]
+        self.commitsData = [[], [], [], [], []]
         self.issuesData = [[], []]
 
         if _gh is None:
@@ -62,9 +67,9 @@ class Repo(QtCore.QObject):
             self.issueTimer.start()
 
             self.milestoneTimer = QtCore.QTimer()
-            #self.milestoneTimer.setInterval(400)
-            #self.milestoneTimer.timeout.connect(self.pullMilestones)
-            #self.milestoneTimer.start()
+            # self.milestoneTimer.setInterval(400)
+            # self.milestoneTimer.timeout.connect(self.pullMilestones)
+            # self.milestoneTimer.start()
 
             self.commitPulled.connect(self.processCommits)
             self.issuePulled.connect(self.processIssues)
@@ -84,11 +89,13 @@ class Repo(QtCore.QObject):
             return
         else:
             self.unprocessedCommits.append([Commit(commit) for commit in page])
+            print("Pulled commit page")
             self.commitPulled.emit()
             self.commitPage += 1
 
     def processCommits(self):
-        data = [[], [], []]
+        # Date, bugfix, feature, linesAdded, linesRemoved
+        data = [[], [], [], [], []]
         while len(self.unprocessedCommits):
             block = self.unprocessedCommits.pop()
             for commit in block:
@@ -101,20 +108,14 @@ class Repo(QtCore.QObject):
                 else:
                     data[1].append(0)
                     data[2].append(1)
+
+                data[3].append(commit.linesAdded)
+                data[4].append(commit.linesRemoved)
                 self.processedCommits.append(commit)
-        data = sortByKey(data)
-        for i in range(1, len(data[0])):
-            data[1][i] += data[1][i-1]
-            data[2][i] += data[2][i-1]
-        total = [0, 0]
-        total[0] = data[1][-1]
-        total[1] = data[2][-1]
-        for i in range(0, len(self.commitsData[0])):
-            self.commitsData[1][i] += total[0]
-            self.commitsData[2][i] += total[1]
-        self.commitsData[0][0:0] = data[0]
-        self.commitsData[1][0:0] = data[1]
-        self.commitsData[2][0:0] = data[2]
+        for i in range(len(data)):
+            self.commitsData[i][0:0] = data[i]
+        self.commitsData = sortByKey(self.commitsData)
+        print("Processed", len(data[0]), "commits")
         self.commitProcessed.emit()
 
     def classifyCommitMessage(self, message):
@@ -136,14 +137,14 @@ class Repo(QtCore.QObject):
         else:
             #processedPage = [Issue(issue) for issue in filter(lambda x: (self.until is NotSet or x.created_at <= self.until) and (self.since is NotSet or x.created_at >= self.since), page)]
             #processedPage = [Issue(issue) for issue in page]
-            #self.unprocessedIssues.append(processedPage)
+            # self.unprocessedIssues.append(processedPage)
             self.unprocessedIssues.append([Issue(issue) for issue in page])
+            print("Pulled issues page")
             self.issuePulled.emit()
             self.issuePage += 1
 
     def processIssues(self):
         data = [[], []]
-        closed = []
         while len(self.unprocessedIssues):
             block = self.unprocessedIssues.pop()
             for issue in block:
@@ -152,36 +153,13 @@ class Repo(QtCore.QObject):
                 data[1].append(1)
                 if issue.closedAt is not None:
                     close = toUnix(issue.closedAt)
-                    closed.append(close)
+                    data[0].append(close)
+                    data[1].append(-1)
                 self.processedIssues.append(issue)
-        data = sortByKey(data)
-        closed = sorted(closed)
-        if len(data) == 0:
-            return
-        for i in range(1, len(data[0])):
-            data[1][i] += data[1][i-1]
-        total = data[1][-1]
-        for i in range(0, len(self.issuesData[0])):
-            self.issuesData[1][i] += total
         self.issuesData[0][0:0] = data[0]
         self.issuesData[1][0:0] = data[1]
-
-        #print(self.issuesData)
-        total = 0
-        for i in range(len(closed) - 1):
-            total -= 1
-            first = bisect_left(self.issuesData[0], closed[i])
-            val = self.issuesData[1][first-1]
-            self.issuesData[0].insert(first, closed[i])
-            self.issuesData[1].insert(first, val-1)
-            if i == len(closed) - 1:
-                second = len(self.issuesData[0])-1
-            else:
-                second = bisect_left(self.issuesData[0], closed[i+1])
-            for j in range(first, second):
-                self.issuesData[1][j] -= total
-        #print(self.issuesData)
-
+        self.issuesData = sortByKey(self.issuesData)
+        print("Processed", len(data[0]), "issues")
         self.issueProcessed.emit()
 
     def pullMilestones(self):
@@ -197,8 +175,9 @@ class Repo(QtCore.QObject):
             self.milestoneTimer.stop()
             return
         else:
-            self.unprocessedMilestones.append([Milestone(milestone) for milestone in page])
-            #self.milestonePulled.emit()
+            self.unprocessedMilestones.append(
+                [Milestone(milestone) for milestone in page])
+            # self.milestonePulled.emit()
             self.milestonePage += 1
 
     def read_cache(self):
@@ -209,6 +188,7 @@ class Repo(QtCore.QObject):
 
 
 class Issue(QtCore.QObject):
+
     def __init__(self, issue):
         self.createdAt = issue.created_at
         self.closedAt = issue.closed_at
@@ -221,6 +201,7 @@ class Issue(QtCore.QObject):
 
 
 class Commit(QtCore.QObject):
+
     def __init__(self, commit):
         self.committer = commit.commit.committer.name
         self.message = commit.commit.message
@@ -235,6 +216,7 @@ class Commit(QtCore.QObject):
 
 
 class Milestone(QtCore.QObject):
+
     def __init__(self, milestone):
         self.title = milestone.title
         self.createdAt = milestone.created_at

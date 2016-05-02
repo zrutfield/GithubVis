@@ -1,34 +1,92 @@
 import sys
-#import csv
-#import random
-#import json
+# import csv
+# import random
+# import json
 from datetime import datetime
 
 from github import Github
-from PyQt4 import QtGui  # , QtCore
+from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 import numpy as np
 from scipy import interpolate
 
 from repo import Repo, toUnix
 
+
 class TimeAxisItem(pg.AxisItem):
+
     def __ini__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def tickStrings(self, values, scale, spacing):
         return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
 
-yearseconds = (datetime(2, 1, 1) - datetime(1, 1, 1)).total_seconds()
+yearseconds = (datetime(3, 1, 1) - datetime(1, 1, 1)).total_seconds()
+
+
+class Plot(pg.PlotItem):
+
+    def __init__(self, numCurves=0, data=None, **kargs):
+        super(Plot, self).__init__(**kargs)
+
+        today = toUnix(datetime.today())
+
+        self.data = data
+
+        self.disableAutoRange(axis=self.getViewBox().XAxis)
+        self.setXRange(today - yearseconds, today)
+        self.auto = False
+
+        self.curves = [self.plot() for i in range(numCurves)]
+        self.vline = pg.InfiniteLine(angle=90, movable=False, pen='k')
+        self.addItem(self.vline)
+
+        self.legend = self.addLegend()
+
+        self.linkedPlots = []
+
+    def link(self, other):
+        self.getViewBox().linkView(axis=self.getViewBox().XAxis,
+                                   view=other.getViewBox())
+        self.linkedPlots.append(other)
+        other.linkedPlots.append(self)
+
+    def changeData(self, data, titles):
+        self.data = data
+        for i, v in enumerate(titles):
+            self.legend.addItem(self.curves[i],
+                                titles[i])
+
+    def updatePlot(self):
+        for i, curve in enumerate(self.curves):
+            if i < len(self.data) - 1:
+                curve.setData(x=self.data[0],
+                              y=np.cumsum(self.data[1 + i]),
+                              pen=(i, len(self.curves)))
+            else:
+                curve.setData(x=self.data[0],
+                              y=np.cumsum([sum(self.data[j][x] for j in range(len(self.data)))
+                                           for x in range(len(self.data[0]))]),
+                              pen=(i, len(self.curves)))
+
+    def mouseMoved(self, event):
+        if self.sceneBoundingRect().contains(event):
+            point = self.getViewBox().mapSceneToView(event)
+            self.vline.setPos(point.x())
+            for link in self.linkedPlots:
+                link.vline.setPos(point.x())
+
 
 class Window(QtGui.QWidget):
+
     def __init__(self):
         super(Window, self).__init__()
 
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
 
-        self.github = Github()  # Need to put in authentication
+        # Need to put in authentication
+        self.github = Github()
 
         print(self.github.rate_limiting)
         self.createPlots()
@@ -36,23 +94,35 @@ class Window(QtGui.QWidget):
         self.createUI()
 
     def createPlots(self):
+        # today = toUnix(datetime.today())
         self.layout = pg.GraphicsLayoutWidget(self)
-        self.issuesPlot = self.layout.addPlot(row=0, col=0, title="Open Issues",
-                                              labels={'left': "Number of Issues", 'bottom': "Date"},
-                                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
-        self.issuesPlot.disableAutoRange(axis=self.issuesPlot.getViewBox().XAxis)
-        today = toUnix(datetime.today())
-        self.issuesPlot.setXRange(today - yearseconds, today)
-        self.issuesCurve = self.issuesPlot.plot()
-        self.commitsPlot = self.layout.addPlot(row=1, col=0, title="Bugfix Commits (Red) vs Feature Commits (Blue)",
-                                               labels={'left': "Number of Commits", 'bottom': "Date"},
-                                               axisItems={'bottom': TimeAxisItem(orientation='bottom')})
-        self.commitsPlot.disableAutoRange(axis=self.commitsPlot.getViewBox().XAxis)
-        self.commitsPlot.setXRange(today - yearseconds, today)
-        self.commitsBugsCurve = self.commitsPlot.plot()
-        self.commitsFeaturesCurve = self.commitsPlot.plot()
-        self.iauto = False
-        self.cauto = False
+
+        self.issuesPlot = Plot(numCurves=1,
+                               title="Open Issues",
+                               labels={'left': "Number of Issues",
+                                       'bottom': "Date"},
+                               axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.layout.addItem(self.issuesPlot, row=0, col=0)
+        self.issuesPlot.scene().sigMouseMoved.connect(self.issuesPlot.mouseMoved)
+
+        self.commitsPlot = Plot(numCurves=2,
+                                title="Bugfix Commits (Red) vs Feature Commits (Blue)",
+                                labels={'left': "Number of Commits",
+                                        'bottom': "Date"},
+                                axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.layout.addItem(self.commitsPlot, row=1, col=0)
+        self.commitsPlot.scene().sigMouseMoved.connect(self.commitsPlot.mouseMoved)
+        self.commitsPlot.link(self.issuesPlot)
+
+        self.linesPlot = Plot(numCurves=3,
+                              title="Number of Lines Added and Removed",
+                              labels={'left': "Number of Lines",
+                                      'bottom': "Date"},
+                              axisItems={'bottom': TimeAxisItem(orientation='bottom')})
+        self.layout.addItem(self.linesPlot, row=2, col=0)
+        self.linesPlot.scene().sigMouseMoved.connect(self.linesPlot.mouseMoved)
+        self.linesPlot.link(self.issuesPlot)
+        self.linesPlot.link(self.commitsPlot)
 
     def createUI(self):
         self.repoEdit = QtGui.QLineEdit(self)
@@ -81,46 +151,26 @@ class Window(QtGui.QWidget):
 
     def createRepo(self):
         print("Getting repo: ", self.repoEdit.text())
-        #testDateSince1 = datetime(2016, 3, 18)
-        #testDateSince1 = datetime(2012, 5, 7)
-        #testDateUntil1 = datetime(2016, 3, 25)
+        # testDateSince1 = datetime(2016, 3, 18)
+        # testDateSince1 = datetime(2012, 5, 7)
+        # testDateUntil1 = datetime(2016, 3, 25)
         self.repo = Repo(self.repoEdit.text(), _gh=self.github)
-        print("Got data")
-        self.repo.issueProcessed.connect(self.updateIssuesPlot)
-        self.repo.commitProcessed.connect(self.updateCommitPlot)
+
+        self.issuesPlot.changeData(self.repo.issuesData, ["Open Issues"])
+        self.commitsPlot.changeData(self.repo.commitsData[0:3],
+                                    ["Bugfixes", "Features"])
+        self.linesPlot.changeData([self.repo.commitsData[0],
+                                   self.repo.commitsData[3],
+                                   self.repo.commitsData[4]],
+                                  ["Additions", "Removals", "Total"])
+        self.repo.issueProcessed.connect(self.issuesPlot.updatePlot)
+        self.repo.commitProcessed.connect(self.commitsPlot.updatePlot)
+        self.repo.commitProcessed.connect(self.linesPlot.updatePlot)
 
     def stopRepo(self):
         self.repo.issueTimer.stop()
         self.repo.commitTimer.stop()
-
-    def updateIssuesPlot(self):
-        #sl = self.smoothLine(self.issuesData[0], self.issuesData[1])
-        #self.issuesCurve.clear()
-        self.issuesCurve.setData(x=self.repo.issuesData[0], y=self.repo.issuesData[1], pen={'color': 'r',
-                                                                                            'width': 1})
-        if not self.iauto and self.repo.issuesData[0][-1] - self.repo.issuesData[0][0] > yearseconds:
-            self.issuesPlot.enableAutoRange(axis=self.issuesPlot.getViewBox().XAxis)
-            self.iauto = True
-        #self.issuesCurve.setData(x=sl[0], y=sl[1], pen='r')
-
-    def updateCommitPlot(self):
-        size = len(self.repo.commitsData[0])
-        #y0 = np.zeros(size)
-        #self.commitsPlot.plot(x=self.commitsData[0], y=y0)
-        #y0 = [y0[i] + self.commitsData[1][i] for i in range(size)]
-        y0 = self.repo.commitsData[1][:]
-        self.commitsBugsCurve.setData(x=self.repo.commitsData[0], y=y0, pen='r', fillLevel=0, brush='r')
-        #sy = self.smoothLine(self.commitsData[0], y0)
-        #self.commitsBugsCurve.setData(x=sy[0], y=sy[1], pen='r')
-        y0 = [y0[i] + self.repo.commitsData[2][i] for i in range(size)]
-        self.commitsFeaturesCurve.setData(x=self.repo.commitsData[0], y=y0, pen='b')
-        self.commitsPlot.addItem(pg.FillBetweenItem(self.commitsFeaturesCurve,
-                                                    self.commitsBugsCurve, 'b'))
-        #sy = self.smoothLine(self.commitsData[0], y0)
-        #self.commitsFeaturesCurve.setData(x=sy[0], y=sy[1], pen='b')
-        if not self.cauto and self.repo.commitsData[0][-1] - self.repo.commitsData[0][0] > yearseconds:
-            self.commitsPlot.enableAutoRange(axis=self.commitsPlot.getViewBox().XAxis)
-            self.cauto = True
+        self.repo.milestoneTimer.stop()
 
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
