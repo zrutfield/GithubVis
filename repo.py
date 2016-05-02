@@ -20,7 +20,6 @@ def toUnix(time):
 
 # Sorts a list of lists by the first list in the set
 
-
 def sortByKey(data):
     return [list(x) for x in zip(*sorted(zip(*data), key=lambda p: p[0]))]
 
@@ -114,7 +113,7 @@ class Repo(QtCore.QObject):
                 self.processedCommits.append(commit)
         for i in range(len(data)):
             self.commitsData[i][0:0] = data[i]
-        self.commitsData = sortByKey(self.commitsData)
+        # self.commitsData = sortByKey(self.commitsData)
         print("Processed", len(data[0]), "commits")
         self.commitProcessed.emit()
 
@@ -162,7 +161,7 @@ class Repo(QtCore.QObject):
                 self.processedIssues.append(issue)
         self.issuesData[0][0:0] = data[0]
         self.issuesData[1][0:0] = data[1]
-        self.issuesData = sortByKey(self.issuesData)
+        # self.issuesData = sortByKey(self.issuesData)
         print("Processed", len(data[0]), "issues")
         self.issueProcessed.emit()
 
@@ -211,8 +210,8 @@ class Commit(QtCore.QObject):
         self.message = commit.commit.message
         self.commitDate = commit.commit.committer.date
         self.lastModified = commit.last_modified
-        #self.linesAdded = commit.stats.additions
-        #self.linesRemoved = commit.stats.deletions
+        self.linesAdded = commit.stats.additions
+        self.linesRemoved = commit.stats.deletions
 
     def __str__(self):
         return "".join(["Commit(", str(self.committer), ", ", str(self.message), ", ",

@@ -10,7 +10,7 @@ import pyqtgraph as pg
 import numpy as np
 from scipy import interpolate
 
-from repo import Repo, toUnix
+from repo import Repo, toUnix, sortByKey
 from github.GithubObject import NotSet
 
 
@@ -59,15 +59,16 @@ class Plot(pg.PlotItem):
                                 titles[i])
 
     def updatePlot(self):
+        plotdata = sortByKey(self.data)
         for i, curve in enumerate(self.curves):
-            if i < len(self.data) - 1:
-                curve.setData(x=self.data[0],
-                              y=np.cumsum(self.data[1 + i]),
+            if i < len(plotdata) - 1:
+                curve.setData(x=plotdata[0],
+                              y=np.cumsum(plotdata[1 + i]),
                               pen=(i, len(self.curves)))
             else:
-                curve.setData(x=self.data[0],
-                              y=np.cumsum([sum(self.data[j][x] for j in range(len(self.data)))
-                                           for x in range(len(self.data[0]))]),
+                curve.setData(x=plotdata[0],
+                              y=np.cumsum([sum(plotdata[j][x] for j in range(1, len(plotdata)))
+                                           for x in range(len(plotdata[0]))]),
                               pen=(i, len(self.curves)))
 
     def mouseMoved(self, event):
