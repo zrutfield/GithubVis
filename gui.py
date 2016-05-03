@@ -43,6 +43,7 @@ class Plot(pg.PlotItem):
         self.addItem(self.vline)
 
         self.legend = self.addLegend()
+        self.titles = []
 
         self.linkedPlots = []
 
@@ -52,14 +53,32 @@ class Plot(pg.PlotItem):
         self.linkedPlots.append(other)
         other.linkedPlots.append(self)
 
+    def clear(self):
+        self.data = None
+        for t in self.titles:
+            self.legend.removeItem(t)
+            
+        today = toUnix(datetime.today())
+        self.disableAutoRange(axis=self.getViewBox().XAxis)
+        self.setXRange(today - yearseconds, today)
+        self.auto = False
+            
+
     def changeData(self, data, titles):
+        self.clear()
+        
         self.data = data
+        self.titles = titles
         for i, v in enumerate(titles):
             self.legend.addItem(self.curves[i],
                                 titles[i])
-
+        
     def updatePlot(self):
         plotdata = sortByKey(self.data)
+        if not self.auto and plotdata[0][-1] - plotdata[0][0] > yearseconds:
+              self.enableAutoRange(axis=self.getViewBox().XAxis)
+              self.auto = True
+              
         for i, curve in enumerate(self.curves):
             if i < len(plotdata) - 1:
                 curve.setData(x=plotdata[0],
@@ -91,9 +110,13 @@ class Window(QtGui.QWidget):
         self.github = Github()
 
         print(self.github.rate_limiting)
+
+        self.plots = []
         self.createPlots()
 
         self.createUI()
+
+        self.milestoneVbars = []
 
     def createPlots(self):
         # today = toUnix(datetime.today())
@@ -106,6 +129,7 @@ class Window(QtGui.QWidget):
                                axisItems={'bottom': TimeAxisItem(orientation='bottom')})
         self.layout.addItem(self.issuesPlot, row=0, col=0)
         self.issuesPlot.scene().sigMouseMoved.connect(self.issuesPlot.mouseMoved)
+        self.plots.append(self.issuesPlot)
 
         self.commitsPlot = Plot(numCurves=2,
                                 title="Bugfix Commits (Red) vs Feature Commits (Blue)",
@@ -115,6 +139,7 @@ class Window(QtGui.QWidget):
         self.layout.addItem(self.commitsPlot, row=1, col=0)
         self.commitsPlot.scene().sigMouseMoved.connect(self.commitsPlot.mouseMoved)
         self.commitsPlot.link(self.issuesPlot)
+        self.plots.append(self.commitsPlot)
 
         self.linesPlot = Plot(numCurves=3,
                               title="Number of Lines Added and Removed",
@@ -125,6 +150,7 @@ class Window(QtGui.QWidget):
         self.linesPlot.scene().sigMouseMoved.connect(self.linesPlot.mouseMoved)
         self.linesPlot.link(self.issuesPlot)
         self.linesPlot.link(self.commitsPlot)
+        self.plots.append(self.linesPlot)
 
     def createUI(self):
         self.repoEdit = QtGui.QLineEdit(self)
@@ -136,6 +162,16 @@ class Window(QtGui.QWidget):
         self.repoLabel = QtGui.QLabel(self)
         self.repoLabel.setText("Enter Repository:")
 
+        self.startDate = QtGui.QDateTimeEdit(self)
+        self.startDate.setCalendarPopup(True)
+
+        self.endDate = QtGui.QDateTimeEdit(self)
+        self.endDate.setCalendarPopup(True)
+
+        dhbox = QtGui.QHBoxLayout()
+        dhbox.addWidget(self.startDate)
+        dhbox.addWidget(self.endDate)
+
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(self.repoEdit)
         hbox.addWidget(self.repoStart)
@@ -144,6 +180,7 @@ class Window(QtGui.QWidget):
         vbox = QtGui.QVBoxLayout()
         vbox.addWidget(self.repoLabel)
         vbox.addLayout(hbox)
+        vbox.addLayout(dhbox)
         vbox.addWidget(self.layout)
 
         self.setLayout(vbox)
@@ -172,11 +209,19 @@ class Window(QtGui.QWidget):
         self.repo.commitProcessed.connect(self.commitsPlot.updatePlot)
         self.repo.commitProcessed.connect(self.linesPlot.updatePlot)
 
-    def stopRepo(self):
-        self.repo.issueTimer.stop()
-        self.repo.commitTimer.stop()
-        self.repo.milestoneTimer.stop()
+        self.repo.milestoneProcessed.connect(self.addMilestone)
 
+    def stopRepo(self):
+        self.repo.stop()
+
+    def addMilestone(self):
+        for i in range(len(milestoneVbars), len(self.repo.milestoneData)):
+            vbar = pg.InfiniteLine(angle=90, movable=False, pen='k')
+            self.milestoneVbars.append(vbar)
+            for p in self.plots:
+                p.addItem(vbar)
+        
+        
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
         x1 = np.linspace(min(x), max(x), num=len(x) * 100)

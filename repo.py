@@ -25,10 +25,9 @@ def sortByKey(data):
 
 
 class Repo(QtCore.QObject):
-    commitPulled = QtCore.pyqtSignal()
-    issuePulled = QtCore.pyqtSignal()
     commitProcessed = QtCore.pyqtSignal()
     issueProcessed = QtCore.pyqtSignal()
+    milestoneProcessed = QtCore.pyqtSignal()
 
     def __init__(self, _name, _since=NotSet, _until=NotSet, _gh=None):
         QtCore.QObject.__init__(self)
@@ -39,149 +38,62 @@ class Repo(QtCore.QObject):
 
         self.commitsData = [[], [], [], [], []]
         self.issuesData = [[], []]
+        self.milestoneData = [[], []]
 
         if _gh is None:
             self.readCache()  # If no github object is passed in, look in cache
         else:
             self.repo = _gh.get_repo(self.name)
-            self.unprocessedCommits = []
-            self.unprocessedIssues = []
-            self.unprocessedMilestones = []
+            
             self.processedCommits = []
             self.processedIssues = []
             self.processedMilestones = []
 
-            self.commitPage = 0
-            self.issuePage = 0
-            self.milestonePage = 0
+            self.commitThread = CommitThread(self.repo, self.since, self.until)
+            self.commitThread.commitPulled.connect(self.processCommit)
+            self.commitThread.start()
 
-            self.commitTimer = QtCore.QTimer()
-            self.commitTimer.setInterval(200)
-            self.commitTimer.timeout.connect(self.pullCommits)
-            self.commitTimer.start()
+            self.issueThread = IssueThread(self.repo, self.since, self.until)
+            self.issueThread.issuePulled.connect(self.processIssue)
+            self.issueThread.start()
 
-            self.issueTimer = QtCore.QTimer()
-            self.issueTimer.setInterval(200)
-            self.issueTimer.timeout.connect(self.pullIssues)
-            self.issueTimer.start()
+            self.milestoneThread = MilestoneThread(self.repo, self.since, self.until)
+            self.milestoneThread.milestonePulled.connect(self.processMilestone)
+            self.milestoneThread.start()
 
-            self.milestoneTimer = QtCore.QTimer()
-            self.milestoneTimer.setInterval(200)
-            self.milestoneTimer.timeout.connect(self.pullMilestones)
-            self.milestoneTimer.start()
-
-            self.commitPulled.connect(self.processCommits)
-            self.issuePulled.connect(self.processIssues)
-
-    def pullCommits(self):
-        commitsList = self.repo.get_commits(since=self.since, until=self.until)
-        #commitsList = self.repo.get_commits()
-        try:
-            page = commitsList.get_page(self.commitPage)
-        except GithubException:
-            print("Unknown Repository")
-            self.commitTimer.stop()
-            return
-
-        if len(page) == 0:
-            self.commitTimer.stop()
-            return
-        else:
-            self.unprocessedCommits.append([Commit(commit) for commit in page])
-            print("Pulled commit page")
-            self.commitPulled.emit()
-            self.commitPage += 1
-
-    def processCommits(self):
-        # Date, bugfix, feature, linesAdded, linesRemoved
-        data = [[], [], [], [], []]
-        while len(self.unprocessedCommits):
-            block = self.unprocessedCommits.pop()
-            for commit in block:
-                date = toUnix(commit.commitDate)
-                isBug = self.classifyCommitMessage(commit.message)
-                data[0].append(date)
-                if isBug:
-                    data[1].append(1)
-                    data[2].append(0)
-                else:
-                    data[1].append(0)
-                    data[2].append(1)
-
-                data[3].append(commit.linesAdded)
-                data[4].append(commit.linesRemoved)
-                self.processedCommits.append(commit)
-        for i in range(len(data)):
-            self.commitsData[i][0:0] = data[i]
-        # self.commitsData = sortByKey(self.commitsData)
-        print("Processed", len(data[0]), "commits")
+    def stop(self):
+        self.commitThread.stop()
+        self.issueThread.stop()
+        self.milestoneThread.stop()
+            
+    def processCommit(self, commit):
+        commit = commit[0]
+        self.commitsData[0].append(toUnix(commit.commitDate))
+        isBug = self.classifyCommitMessage(commit.message)
+        self.commitsData[1].append(int(isBug))
+        self.commitsData[2].append(1 - int(isBug))
+        self.commitsData[3].append(commit.linesAdded)
+        self.commitsData[4].append(commit.linesRemoved)
+        self.processedCommits.append(commit)
         self.commitProcessed.emit()
 
     def classifyCommitMessage(self, message):
         return bugsearch.search(message) != None
 
-    def pullIssues(self):
-        #issuesList = self.repo.get_issues(state='all', since=self.since)
-        issuesList = self.repo.get_issues(state='all')
-        try:
-            page = issuesList.get_page(self.issuePage)
-        except GithubException:
-            print("Unknown Repository")
-            self.issueTimer.stop()
-            return
-
-        if len(page) == 0:
-            self.issueTimer.stop()
-            return
-        else:
-            processedPage = [Issue(issue) for issue in filter(lambda x: (
-                self.since is NotSet or x.created_at >= self.since), page)]
-            #processedPage = [Issue(issue) for issue in filter(lambda x: (self.until is NotSet or x.created_at <= self.until) and (self.since is NotSet or x.created_at >= self.since), page)]
-            # if len(processedPage) == 0:
-            #    self.issuePage += 1
-            #    return
-            #processedPage = [Issue(issue) for issue in page]
-            self.unprocessedIssues.append(processedPage)
-            #self.unprocessedIssues.append([Issue(issue) for issue in page])
-            self.issuePulled.emit()
-            self.issuePage += 1
-
-    def processIssues(self):
-        data = [[], []]
-        while len(self.unprocessedIssues):
-            block = self.unprocessedIssues.pop()
-            for issue in block:
-                date = toUnix(issue.createdAt)
-                data[0].append(date)
-                data[1].append(1)
-                if issue.closedAt is not None:
-                    close = toUnix(issue.closedAt)
-                    data[0].append(close)
-                    data[1].append(-1)
-                self.processedIssues.append(issue)
-        self.issuesData[0][0:0] = data[0]
-        self.issuesData[1][0:0] = data[1]
-        # self.issuesData = sortByKey(self.issuesData)
-        print("Processed", len(data[0]), "issues")
+    def processIssue(self, issue):
+        issue = issue[0]
+        self.issuesData[0].append(toUnix(issue.createdAt))
+        self.issuesData[1].append(1)
+        if issue.closedAt is not None:
+            self.issuesData[0].append(toUnix(issue.closedAt))
+            self.issuesData[1].append(-1)
         self.issueProcessed.emit()
 
-    def pullMilestones(self):
-        milestonesList = self.repo.get_milestones(state='all')
-        try:
-            page = milestonesList.get_page(self.milestonePage)
-        except GithubException:
-            print("Unknown Repository")
-            self.milestoneTimer.stop()
-            return
-
-        if len(page) == 0:
-            self.milestoneTimer.stop()
-            return
-        else:
-            self.unprocessedMilestones.append(
-                [Milestone(milestone) for milestone in page])
-            # self.milestonePulled.emit()
-            self.milestonePage += 1
+    def processMilestone(self, milestone):
+        milestone = milestone[0]
+        self.milestoneData[0].append(toUnix(milestone.createdAt))
+        self.milestoneData[1].append(milestone.title)
+    
 
     def read_cache(self):
         pass  # TODO: Implement cache
@@ -190,6 +102,87 @@ class Repo(QtCore.QObject):
         pass  # TODO: Implement cache
 
 
+class CommitThread(QtCore.QThread):
+    commitPulled = QtCore.pyqtSignal(list)
+    
+    def __init__(self, repo, since, until):
+        super().__init__()
+        self.repo = repo
+        self.since = since
+        self.until = until
+        self.halt = False
+
+    def run(self):
+        commitsList = self.repo.get_commits(since=self.since, until=self.until)
+        try:
+            page = commitsList.get_page(0)
+        except GithubException:
+            print("Unknown Repository")
+            return
+
+        for commit in commitsList:
+            if self.halt:
+                return
+            self.commitPulled.emit([Commit(commit)])
+
+    def stop(self):
+        self.halt = True
+
+class IssueThread(QtCore.QThread):
+    issuePulled = QtCore.pyqtSignal(list)
+    
+    def __init__(self, repo, since, until):
+        super().__init__()
+        self.repo = repo
+        self.since = since
+        self.until = until
+        self.halt = False
+
+    def run(self):
+        #issuesList = self.repo.get_issues(state='all', since=self.since)
+        issuesList = self.repo.get_issues(state='all')
+        try:
+            page = issuesList.get_page(0)
+        except GithubException:
+            print("Unknown Repository")
+            return
+
+        for issue in issuesList:
+            if self.halt:
+                return
+            if self.since is NotSet or issue.created_at >= self.since:
+                self.issuePulled.emit([Issue(issue)])
+
+    def stop(self):
+        self.halt = True
+
+class MilestoneThread(QtCore.QThread):
+    milestonePulled = QtCore.pyqtSignal(list)
+
+    def __init__(self, repo, since, until):
+        super().__init__()
+        self.repo = repo
+        self.since = since
+        self.until = until
+        self.halt = False
+
+    def run(self):
+        milestonesList = self.repo.get_milestones(state='all')
+        try:
+            page = milestonesList.get_page(0)
+        except GithubException:
+            print("Unknown Repository")
+            return
+
+        for milestone in milestonesList:
+            if self.halt:
+                return
+            self.milestonePulled.emit([Milestone(milestone)])
+            
+    def stop(self):
+        self.halt = True
+
+    
 class Issue(QtCore.QObject):
 
     def __init__(self, issue):
