@@ -44,6 +44,7 @@ class Repo(QtCore.QObject):
             self.readCache()  # If no github object is passed in, look in cache
         else:
             self.repo = _gh.get_repo(self.name)
+            self.createdAt = self.repo.created_at
 
             self.processedCommits = []
             self.processedIssues = []
