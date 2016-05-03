@@ -1,6 +1,5 @@
 import re
 from datetime import datetime
-from bisect import bisect_left
 
 from github import Github, GithubException
 from github.GithubObject import NotSet
@@ -20,6 +19,7 @@ def toUnix(time):
 
 # Sorts a list of lists by the first list in the set
 
+
 def sortByKey(data):
     return [list(x) for x in zip(*sorted(zip(*data), key=lambda p: p[0]))]
 
@@ -38,13 +38,13 @@ class Repo(QtCore.QObject):
 
         self.commitsData = [[], [], [], [], []]
         self.issuesData = [[], []]
-        self.milestoneData = [[], []]
+        self.milestoneData = [[], [], []]
 
         if _gh is None:
             self.readCache()  # If no github object is passed in, look in cache
         else:
             self.repo = _gh.get_repo(self.name)
-            
+
             self.processedCommits = []
             self.processedIssues = []
             self.processedMilestones = []
@@ -57,7 +57,8 @@ class Repo(QtCore.QObject):
             self.issueThread.issuePulled.connect(self.processIssue)
             self.issueThread.start()
 
-            self.milestoneThread = MilestoneThread(self.repo, self.since, self.until)
+            self.milestoneThread = MilestoneThread(
+                self.repo, self.since, self.until)
             self.milestoneThread.milestonePulled.connect(self.processMilestone)
             self.milestoneThread.start()
 
@@ -65,7 +66,7 @@ class Repo(QtCore.QObject):
         self.commitThread.stop()
         self.issueThread.stop()
         self.milestoneThread.stop()
-            
+
     def processCommit(self, commit):
         commit = commit[0]
         self.commitsData[0].append(toUnix(commit.commitDate))
@@ -93,7 +94,12 @@ class Repo(QtCore.QObject):
         milestone = milestone[0]
         self.milestoneData[0].append(toUnix(milestone.createdAt))
         self.milestoneData[1].append(milestone.title)
-    
+        self.milestoneData[2].append('created')
+        # if milestone.dueOn is not None:
+        #     self.milestoneData[0].append(toUnix(milestone.dueOn))
+        #     self.milestoneData[1].append(milestone.title)
+        #     self.milestoneData[2].append('due')
+        self.milestoneProcessed.emit()
 
     def read_cache(self):
         pass  # TODO: Implement cache
@@ -104,7 +110,7 @@ class Repo(QtCore.QObject):
 
 class CommitThread(QtCore.QThread):
     commitPulled = QtCore.pyqtSignal(list)
-    
+
     def __init__(self, repo, since, until):
         super().__init__()
         self.repo = repo
@@ -128,9 +134,10 @@ class CommitThread(QtCore.QThread):
     def stop(self):
         self.halt = True
 
+
 class IssueThread(QtCore.QThread):
     issuePulled = QtCore.pyqtSignal(list)
-    
+
     def __init__(self, repo, since, until):
         super().__init__()
         self.repo = repo
@@ -156,6 +163,7 @@ class IssueThread(QtCore.QThread):
     def stop(self):
         self.halt = True
 
+
 class MilestoneThread(QtCore.QThread):
     milestonePulled = QtCore.pyqtSignal(list)
 
@@ -178,11 +186,11 @@ class MilestoneThread(QtCore.QThread):
             if self.halt:
                 return
             self.milestonePulled.emit([Milestone(milestone)])
-            
+
     def stop(self):
         self.halt = True
 
-    
+
 class Issue(QtCore.QObject):
 
     def __init__(self, issue):

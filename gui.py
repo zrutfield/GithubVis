@@ -9,6 +9,7 @@ from PyQt4 import QtGui, QtCore
 import pyqtgraph as pg
 import numpy as np
 from scipy import interpolate
+from bisect import bisect_left
 
 from repo import Repo, toUnix, sortByKey
 from github.GithubObject import NotSet
@@ -22,21 +23,26 @@ class TimeAxisItem(pg.AxisItem):
     def tickStrings(self, values, scale, spacing):
         return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
 
-yearseconds = (datetime(3, 1, 1) - datetime(1, 1, 1)).total_seconds()
+yearseconds = (datetime(1, 7, 1) - datetime(1, 1, 1)).total_seconds()
 
 
 class Plot(pg.PlotItem):
 
-    def __init__(self, numCurves=0, data=None, **kargs):
+    def __init__(self, numCurves=0, data=[[]], **kargs):
         super(Plot, self).__init__(**kargs)
 
         today = toUnix(datetime.today())
 
         self.data = data
+        self.plotdata = data
 
         self.disableAutoRange(axis=self.getViewBox().XAxis)
         self.setXRange(today - yearseconds, today)
         self.auto = False
+
+        self.setLimits(yMin=0,
+                       xMax=today)
+        self.sigRangeChanged.connect(self.rangeChange)
 
         self.curves = [self.plot() for i in range(numCurves)]
         self.vline = pg.InfiniteLine(angle=90, movable=False, pen='k')
@@ -45,7 +51,18 @@ class Plot(pg.PlotItem):
         self.legend = self.addLegend()
         self.titles = []
 
+        self.htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
+                                 '</span></div>'])
+        self.text = pg.TextItem(html=self.htmltext,
+                                anchor=(1.0, 0), border='w', fill=(0, 0, 0, 100))
+        self.addItem(self.text)
+        self.text.setPos(self.vline.pos())
+
         self.linkedPlots = []
+
+        self.milestoneData = [[], []]
+        self.milestoneVbars = []
+        self.milestoneTexts = []
 
     def link(self, other):
         self.getViewBox().linkView(axis=self.getViewBox().XAxis,
@@ -54,41 +71,68 @@ class Plot(pg.PlotItem):
         other.linkedPlots.append(self)
 
     def clear(self):
-        self.data = None
+        self.data = [[]]
+        self.plotdata = self.data
         for t in self.titles:
             self.legend.removeItem(t)
-            
+
+        for v in self.milestoneVbars:
+            self.removeItem(v)
+        for t in self.milestoneTexts:
+            self.removeItem(t)
+        for c in self.curves:
+            c.setData(x=[], y=[])
+
         today = toUnix(datetime.today())
-        self.disableAutoRange(axis=self.getViewBox().XAxis)
         self.setXRange(today - yearseconds, today)
         self.auto = False
-            
 
     def changeData(self, data, titles):
         self.clear()
-        
+
         self.data = data
         self.titles = titles
         for i, v in enumerate(titles):
             self.legend.addItem(self.curves[i],
                                 titles[i])
-        
+
     def updatePlot(self):
-        plotdata = sortByKey(self.data)
-        if not self.auto and plotdata[0][-1] - plotdata[0][0] > yearseconds:
-              self.enableAutoRange(axis=self.getViewBox().XAxis)
-              self.auto = True
-              
+        self.plotdata = sortByKey(self.data)
+        if not self.auto and self.plotdata[0][-1] - self.plotdata[0][0] > yearseconds:
+            # self.enableAutoRange(axis=self.getViewBox().XAxis)
+            self.auto = True
+
         for i, curve in enumerate(self.curves):
-            if i < len(plotdata) - 1:
-                curve.setData(x=plotdata[0],
-                              y=np.cumsum(plotdata[1 + i]),
-                              pen=(i, len(self.curves)))
+            if i < len(self.plotdata) - 1:
+                curve.setData(x=self.plotdata[0],
+                              y=np.cumsum(self.plotdata[1 + i]),
+                              pen={'color': (i, len(self.curves)),
+                                   'width': 2})
             else:
-                curve.setData(x=plotdata[0],
-                              y=np.cumsum([sum(plotdata[j][x] for j in range(1, len(plotdata)))
-                                           for x in range(len(plotdata[0]))]),
-                              pen=(i, len(self.curves)))
+                self.plotdata.append([sum(self.plotdata[j][x] for j in range(1, len(self.plotdata)))
+                                      for x in range(len(self.plotdata[0]))])
+                curve.setData(x=self.plotdata[0],
+                              y=np.cumsum(self.plotdata[1 + i]),
+                              pen={'color': (i, len(self.curves)),
+                                   'width': 2})
+        if self.auto:
+            self.autoRange()
+
+    def addMilestone(self):
+        for i in range(len(self.milestoneVbars), len(self.milestoneData[0])):
+            vbar = pg.InfiniteLine(angle=90, movable=False, pen={'color': '#0F0',
+                                                                 'width': 1})
+            vbar.setValue(self.milestoneData[0][i])
+            self.addItem(vbar)
+            self.milestoneVbars.append(vbar)
+
+            htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
+                                self.milestoneData[1][i], '</span></div>'])
+            text = pg.TextItem(html=htmltext,
+                               anchor=(0, 1.0), border='w', fill=(0, 0, 0, 100))
+            self.addItem(text)
+            self.milestoneTexts.append(text)
+            text.setPos(self.milestoneData[0][i], self.viewRange()[1][0])
 
     def mouseMoved(self, event):
         if self.sceneBoundingRect().contains(event):
@@ -96,6 +140,28 @@ class Plot(pg.PlotItem):
             self.vline.setPos(point.x())
             for link in self.linkedPlots:
                 link.vline.setPos(point.x())
+        self.updateText()
+
+    def updateText(self):
+        if len(self.data[0]) > 0:
+            index = bisect_left(self.plotdata[0], self.vline.pos().x())
+            if (index > len(self.data[0])):
+                return
+            self.htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
+                                     'Date = ', datetime.fromtimestamp(
+                                         self.plotdata[0][index]).strftime("%b %d, %Y")])
+            for i in range(len(self.curves)):
+                self.htmltext = ''.join([self.htmltext, '<br>',
+                                         self.titles[i], ' = ',
+                                         str(sum(self.plotdata[i + 1][0:index]))])
+            self.htmltext = ''.join([self.htmltext, '</span></div>'])
+            self.text.setHtml(self.htmltext)
+            self.text.setPos(self.vline.pos().x(), self.viewRange()[1][1])
+
+    def rangeChange(self):
+        for text in self.milestoneTexts:
+            text.setPos(text.pos().x(), self.viewRange()[1][0])
+        self.updateText()
 
 
 class Window(QtGui.QWidget):
@@ -116,14 +182,12 @@ class Window(QtGui.QWidget):
 
         self.createUI()
 
-        self.milestoneVbars = []
-
     def createPlots(self):
         # today = toUnix(datetime.today())
         self.layout = pg.GraphicsLayoutWidget(self)
 
         self.issuesPlot = Plot(numCurves=1,
-                               title="Open Issues",
+                               title="Issues",
                                labels={'left': "Number of Issues",
                                        'bottom': "Date"},
                                axisItems={'bottom': TimeAxisItem(orientation='bottom')})
@@ -132,7 +196,7 @@ class Window(QtGui.QWidget):
         self.plots.append(self.issuesPlot)
 
         self.commitsPlot = Plot(numCurves=2,
-                                title="Bugfix Commits (Red) vs Feature Commits (Blue)",
+                                title="Commits",
                                 labels={'left': "Number of Commits",
                                         'bottom': "Date"},
                                 axisItems={'bottom': TimeAxisItem(orientation='bottom')})
@@ -142,7 +206,7 @@ class Window(QtGui.QWidget):
         self.plots.append(self.commitsPlot)
 
         self.linesPlot = Plot(numCurves=3,
-                              title="Number of Lines Added and Removed",
+                              title="Lines of Code",
                               labels={'left': "Number of Lines",
                                       'bottom': "Date"},
                               axisItems={'bottom': TimeAxisItem(orientation='bottom')})
@@ -162,25 +226,36 @@ class Window(QtGui.QWidget):
         self.repoLabel = QtGui.QLabel(self)
         self.repoLabel.setText("Enter Repository:")
 
+        self.startLabel = QtGui.QLabel(self)
+        self.startLabel.setText("Start Date:")
         self.startDate = QtGui.QDateTimeEdit(self)
         self.startDate.setCalendarPopup(True)
+        self.startDate.setDate(datetime.today())
 
+        self.endLabel = QtGui.QLabel(self)
+        self.endLabel.setText("End Date:")
         self.endDate = QtGui.QDateTimeEdit(self)
         self.endDate.setCalendarPopup(True)
-
-        dhbox = QtGui.QHBoxLayout()
-        dhbox.addWidget(self.startDate)
-        dhbox.addWidget(self.endDate)
+        self.endDate.setDate(datetime.today())
 
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(self.repoEdit)
         hbox.addWidget(self.repoStart)
         hbox.addWidget(self.repoStop)
 
+        dhbox1 = QtGui.QHBoxLayout()
+        dhbox1.addWidget(self.startLabel)
+        dhbox1.addWidget(self.endLabel)
+
+        dhbox2 = QtGui.QHBoxLayout()
+        dhbox2.addWidget(self.startDate)
+        dhbox2.addWidget(self.endDate)
+
         vbox = QtGui.QVBoxLayout()
         vbox.addWidget(self.repoLabel)
         vbox.addLayout(hbox)
-        vbox.addLayout(dhbox)
+        vbox.addLayout(dhbox1)
+        vbox.addLayout(dhbox2)
         vbox.addWidget(self.layout)
 
         self.setLayout(vbox)
@@ -190,9 +265,6 @@ class Window(QtGui.QWidget):
 
     def createRepo(self):
         print("Getting repo: ", self.repoEdit.text())
-        #testDateSince1 = datetime(2016, 3, 18)
-        #testDateSince1 = datetime(2012, 5, 7)
-        #testDateUntil1 = datetime(2016, 3, 25)
         testDateSince1 = NotSet
         testDateUntil1 = NotSet
         self.repo = Repo(self.repoEdit.text(), _since=testDateSince1,
@@ -209,19 +281,13 @@ class Window(QtGui.QWidget):
         self.repo.commitProcessed.connect(self.commitsPlot.updatePlot)
         self.repo.commitProcessed.connect(self.linesPlot.updatePlot)
 
-        self.repo.milestoneProcessed.connect(self.addMilestone)
+        for p in self.plots:
+            self.repo.milestoneProcessed.connect(p.addMilestone)
+            p.milestoneData = self.repo.milestoneData
 
     def stopRepo(self):
         self.repo.stop()
 
-    def addMilestone(self):
-        for i in range(len(milestoneVbars), len(self.repo.milestoneData)):
-            vbar = pg.InfiniteLine(angle=90, movable=False, pen='k')
-            self.milestoneVbars.append(vbar)
-            for p in self.plots:
-                p.addItem(vbar)
-        
-        
     def smoothLine(self, x, y):
         spline = interpolate.UnivariateSpline(x, y)
         x1 = np.linspace(min(x), max(x), num=len(x) * 100)
