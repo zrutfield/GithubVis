@@ -96,6 +96,22 @@ class Plot(pg.PlotItem):
             self.legend.addItem(self.curves[i],
                                 titles[i])
 
+    def addMilestone(self):
+        for i in range(len(self.milestoneVbars), len(self.milestoneData[0])):
+            vbar = pg.InfiniteLine(angle=90, movable=False, pen={'color': '#0F0',
+                                                                 'width': 1})
+            vbar.setValue(self.milestoneData[0][i])
+            self.addItem(vbar)
+            self.milestoneVbars.append(vbar)
+
+            htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
+                                self.milestoneData[1][i], '</span></div>'])
+            text = pg.TextItem(html=htmltext,
+                               anchor=(0, 1.0), border='w', fill=(0, 0, 0, 100))
+            self.addItem(text)
+            self.milestoneTexts.append(text)
+            text.setPos(self.milestoneData[0][i], self.viewRange()[1][0])
+
     def updatePlot(self):
         self.plotdata = sortByKey(self.data)
         if not self.auto and self.plotdata[0][-1] - self.plotdata[0][0] > yearseconds:
@@ -118,34 +134,10 @@ class Plot(pg.PlotItem):
         if self.auto:
             self.autoRange()
 
-    def addMilestone(self):
-        for i in range(len(self.milestoneVbars), len(self.milestoneData[0])):
-            vbar = pg.InfiniteLine(angle=90, movable=False, pen={'color': '#0F0',
-                                                                 'width': 1})
-            vbar.setValue(self.milestoneData[0][i])
-            self.addItem(vbar)
-            self.milestoneVbars.append(vbar)
-
-            htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
-                                self.milestoneData[1][i], '</span></div>'])
-            text = pg.TextItem(html=htmltext,
-                               anchor=(0, 1.0), border='w', fill=(0, 0, 0, 100))
-            self.addItem(text)
-            self.milestoneTexts.append(text)
-            text.setPos(self.milestoneData[0][i], self.viewRange()[1][0])
-
-    def mouseMoved(self, event):
-        if self.sceneBoundingRect().contains(event):
-            point = self.getViewBox().mapSceneToView(event)
-            self.vline.setPos(point.x())
-            for link in self.linkedPlots:
-                link.vline.setPos(point.x())
-        self.updateText()
-
     def updateText(self):
         if len(self.data[0]) > 0:
-            index = bisect_left(self.plotdata[0], self.vline.pos().x())
-            if (index > len(self.data[0])):
+            index = bisect_left(self.plotdata[0], self.vline.pos().x()) - 1
+            if index < 0 or index > len(self.data[0]):
                 return
             self.htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
                                      'Date = ', datetime.fromtimestamp(
@@ -157,6 +149,14 @@ class Plot(pg.PlotItem):
             self.htmltext = ''.join([self.htmltext, '</span></div>'])
             self.text.setHtml(self.htmltext)
             self.text.setPos(self.vline.pos().x(), self.viewRange()[1][1])
+
+    def mouseMoved(self, event):
+        if self.sceneBoundingRect().contains(event):
+            point = self.getViewBox().mapSceneToView(event)
+            self.vline.setPos(point.x())
+            for link in self.linkedPlots:
+                link.vline.setPos(point.x())
+        self.updateText()
 
     def rangeChange(self):
         for text in self.milestoneTexts:
@@ -260,7 +260,7 @@ class Window(QtGui.QWidget):
 
         self.setLayout(vbox)
 
-        self.setGeometry(400, 400, 1000, 1000)
+        self.setGeometry(0, 0, 1024, 720)
         self.setWindowTitle("GithubVis")
 
     def createRepo(self):
