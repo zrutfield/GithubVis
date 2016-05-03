@@ -55,8 +55,8 @@ class Plot(pg.PlotItem):
                                  '</span></div>'])
         self.text = pg.TextItem(html=self.htmltext,
                                 anchor=(1.0, 0), border='w', fill=(0, 0, 0, 100))
-        self.addItem(self.text)
         self.text.setPos(self.vline.pos())
+        self.showText = False
 
         self.linkedPlots = []
 
@@ -137,8 +137,15 @@ class Plot(pg.PlotItem):
     def updateText(self):
         if len(self.data[0]) > 0:
             index = bisect_left(self.plotdata[0], self.vline.pos().x()) - 1
-            if index < 0 or index > len(self.data[0]):
+            if (index < 0 or index > len(self.data[0])):
+                if self.showText:
+                    self.removeItem(self.text)
+                self.showText = False
                 return
+            if not self.showText:
+                self.addItem(self.text)
+                self.showText = True
+            
             self.htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
                                      'Date = ', datetime.fromtimestamp(
                                          self.plotdata[0][index]).strftime("%b %d, %Y")])
