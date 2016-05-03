@@ -11,7 +11,7 @@ import numpy as np
 from scipy import interpolate
 from bisect import bisect_left
 
-from repo import Repo, toUnix, sortByKey
+from repo import Repo, toUnix, sortByKey, unixDt
 from github.GithubObject import NotSet
 
 
@@ -39,6 +39,7 @@ class Plot(pg.PlotItem):
         self.disableAutoRange(axis=self.getViewBox().XAxis)
         self.setXRange(today - yearseconds, today)
         self.auto = False
+        self.doAuto = True
 
         self.setLimits(yMin=0,
                        xMax=today)
@@ -86,6 +87,7 @@ class Plot(pg.PlotItem):
         today = toUnix(datetime.today())
         self.setXRange(today - yearseconds, today)
         self.auto = False
+        self.doAuto = True
 
     def changeData(self, data, titles):
         self.clear()
@@ -114,7 +116,7 @@ class Plot(pg.PlotItem):
 
     def updatePlot(self):
         self.plotdata = sortByKey(self.data)
-        if not self.auto and self.plotdata[0][-1] - self.plotdata[0][0] > yearseconds:
+        if self.doAuto and not self.auto and self.plotdata[0][-1] - self.plotdata[0][0] > yearseconds:
             # self.enableAutoRange(axis=self.getViewBox().XAxis)
             self.auto = True
 
@@ -131,7 +133,7 @@ class Plot(pg.PlotItem):
                               y=np.cumsum(self.plotdata[1 + i]),
                               pen={'color': (i, len(self.curves)),
                                    'width': 2})
-        if self.auto:
+        if self.doAuto and self.auto:
             self.autoRange()
 
     def updateText(self):
@@ -169,6 +171,12 @@ class Plot(pg.PlotItem):
         for text in self.milestoneTexts:
             text.setPos(text.pos().x(), self.viewRange()[1][0])
         self.updateText()
+
+    def setRange(self, start, end):
+        if start is not None:
+            self.setXRange(start, self.viewRange()[0][1])
+        if end is not None:
+            self.setXRange(self.viewRange()[0][0], end)
 
 
 class Window(QtGui.QWidget):
@@ -237,13 +245,17 @@ class Window(QtGui.QWidget):
         self.startLabel.setText("Start Date:")
         self.startDate = QtGui.QDateTimeEdit(self)
         self.startDate.setCalendarPopup(True)
-        self.startDate.setDate(datetime.today())
+        self.startDate.setDateTime(datetime.today())
+        self.startDate.setDateTimeRange(unixDt, datetime.today())
+        self.startDate.dateTimeChanged.connect(self.changeStartDate)
 
         self.endLabel = QtGui.QLabel(self)
         self.endLabel.setText("End Date:")
         self.endDate = QtGui.QDateTimeEdit(self)
         self.endDate.setCalendarPopup(True)
-        self.endDate.setDate(datetime.today())
+        self.endDate.setDateTime(datetime.today())
+        self.endDate.setDateTimeRange(unixDt, datetime.today())
+        self.endDate.dateTimeChanged.connect(self.changeEndDate)
 
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(self.repoEdit)
@@ -292,6 +304,8 @@ class Window(QtGui.QWidget):
             self.repo.milestoneProcessed.connect(p.addMilestone)
             p.milestoneData = self.repo.milestoneData
 
+        self.startDate.setDateTime(self.repo.createdAt)
+
     def stopRepo(self):
         self.repo.stop()
 
@@ -301,6 +315,15 @@ class Window(QtGui.QWidget):
         y1 = spline(x1)
         return (x1, y1)
 
+    def changeStartDate(self, dt):
+        for p in self.plots:
+            p.doAuto = False
+            p.setRange(toUnix(dt.toPyDateTime()), None)
+
+    def changeEndDate(self, dt):
+        for p in self.plots:
+            p.doAuto = False
+            p.setRange(None, toUnix(dt.toPyDateTime()))
 
 def main():
     app = QtGui.QApplication(sys.argv)
