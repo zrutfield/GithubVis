@@ -18,8 +18,6 @@ def toUnix(time):
     return (time - unixDt).total_seconds()
 
 # Sorts a list of lists by the first list in the set
-
-
 def sortByKey(data):
     return [list(x) for x in zip(*sorted(zip(*data), key=lambda p: p[0]))]
 
@@ -50,6 +48,7 @@ class Repo(QtCore.QObject):
             self.processedIssues = []
             self.processedMilestones = []
 
+            # Create threads for pulling data
             self.commitThread = CommitThread(self.repo, self.since, self.until)
             self.commitThread.commitPulled.connect(self.processCommit)
             self.commitThread.start()
@@ -68,6 +67,7 @@ class Repo(QtCore.QObject):
         self.issueThread.stop()
         self.milestoneThread.stop()
 
+    # Process each new commit
     def processCommit(self, commit):
         commit = commit[0]
         self.commitsData[0].append(toUnix(commit.commitDate))
@@ -79,9 +79,11 @@ class Repo(QtCore.QObject):
         self.processedCommits.append(commit)
         self.commitProcessed.emit()
 
+    # Classify a commit as bugfix or feature
     def classifyCommitMessage(self, message):
         return bugsearch.search(message) != None
 
+    # Process each new issue
     def processIssue(self, issue):
         issue = issue[0]
         self.issuesData[0].append(toUnix(issue.createdAt))
@@ -91,6 +93,7 @@ class Repo(QtCore.QObject):
             self.issuesData[1].append(-1)
         self.issueProcessed.emit()
 
+    # Process each new milestone
     def processMilestone(self, milestone):
         milestone = milestone[0]
         self.milestoneData[0].append(toUnix(milestone.createdAt))
@@ -109,6 +112,7 @@ class Repo(QtCore.QObject):
         pass  # TODO: Implement cache
 
 
+# Thread object to pull commits
 class CommitThread(QtCore.QThread):
     commitPulled = QtCore.pyqtSignal(list)
 
@@ -136,6 +140,7 @@ class CommitThread(QtCore.QThread):
         self.halt = True
 
 
+# Thread object to pull issues
 class IssueThread(QtCore.QThread):
     issuePulled = QtCore.pyqtSignal(list)
 
@@ -165,6 +170,7 @@ class IssueThread(QtCore.QThread):
         self.halt = True
 
 
+# Thread object to pull milestones
 class MilestoneThread(QtCore.QThread):
     milestonePulled = QtCore.pyqtSignal(list)
 

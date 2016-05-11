@@ -14,7 +14,7 @@ from bisect import bisect_left
 from repo import Repo, toUnix, sortByKey, unixDt
 from github.GithubObject import NotSet
 
-
+# Axis for plotting dates, used by the plots
 class TimeAxisItem(pg.AxisItem):
 
     def __ini__(self, *args, **kwargs):
@@ -23,9 +23,10 @@ class TimeAxisItem(pg.AxisItem):
     def tickStrings(self, values, scale, spacing):
         return [datetime.fromtimestamp(value).strftime("%b %d, %Y") for value in values]
 
+# Years time converted to seconds
 yearseconds = (datetime(1, 7, 1) - datetime(1, 1, 1)).total_seconds()
 
-
+# Plot object
 class Plot(pg.PlotItem):
 
     def __init__(self, numCurves=0, data=[[]], **kargs):
@@ -36,6 +37,7 @@ class Plot(pg.PlotItem):
         self.data = data
         self.plotdata = data
 
+        # Disable auto range until data time is greater than a year
         self.disableAutoRange(axis=self.getViewBox().XAxis)
         self.setXRange(today - yearseconds, today)
         self.auto = False
@@ -49,7 +51,9 @@ class Plot(pg.PlotItem):
         self.vline = pg.InfiniteLine(angle=90, movable=False, pen='k')
         self.addItem(self.vline)
 
+        # Add legend
         self.legend = self.addLegend()
+        self.legend.anchor(0, 0)
         self.titles = []
 
         self.htmltext = ''.join(['<div style="text-align: center"><span style="color: #FFF;">',
@@ -65,12 +69,14 @@ class Plot(pg.PlotItem):
         self.milestoneVbars = []
         self.milestoneTexts = []
 
+    # Link this plot to another, ensuring scales are adjusted on both
     def link(self, other):
         self.getViewBox().linkView(axis=self.getViewBox().XAxis,
                                    view=other.getViewBox())
         self.linkedPlots.append(other)
         other.linkedPlots.append(self)
 
+    # Clear plot for changing datasets
     def clear(self):
         self.data = [[]]
         self.plotdata = self.data
@@ -89,15 +95,18 @@ class Plot(pg.PlotItem):
         self.auto = False
         self.doAuto = True
 
+    # Change datasets
     def changeData(self, data, titles):
         self.clear()
 
         self.data = data
         self.titles = titles
+        # Add curve for each set of data in plot
         for i, v in enumerate(titles):
             self.legend.addItem(self.curves[i],
                                 titles[i])
 
+    # Add a new milestone to be plotted on graph
     def addMilestone(self):
         for i in range(len(self.milestoneVbars), len(self.milestoneData[0])):
             vbar = pg.InfiniteLine(angle=90, movable=False, pen={'color': '#0F0',
@@ -114,6 +123,7 @@ class Plot(pg.PlotItem):
             self.milestoneTexts.append(text)
             text.setPos(self.milestoneData[0][i], self.viewRange()[1][0])
 
+    # Update plot with new data
     def updatePlot(self):
         self.plotdata = sortByKey(self.data)
         if self.doAuto and not self.auto and self.plotdata[0][-1] - self.plotdata[0][0] > yearseconds:
@@ -126,6 +136,7 @@ class Plot(pg.PlotItem):
                               y=np.cumsum(self.plotdata[1 + i]),
                               pen={'color': (i, len(self.curves)),
                                    'width': 2})
+            # If more curves than number of datasets, plot sum of datasets (used in additions/deletions plot)
             else:
                 self.plotdata.append([sum(self.plotdata[j][x] for j in range(1, len(self.plotdata)))
                                       for x in range(len(self.plotdata[0]))])
@@ -136,6 +147,7 @@ class Plot(pg.PlotItem):
         if self.doAuto and self.auto:
             self.autoRange()
 
+    # Update mouse hover text
     def updateText(self):
         if len(self.data[0]) > 0:
             index = bisect_left(self.plotdata[0], self.vline.pos().x()) - 1
@@ -159,6 +171,7 @@ class Plot(pg.PlotItem):
             self.text.setHtml(self.htmltext)
             self.text.setPos(self.vline.pos().x(), self.viewRange()[1][1])
 
+    # Slot for catching mouse movement
     def mouseMoved(self, event):
         if self.sceneBoundingRect().contains(event):
             point = self.getViewBox().mapSceneToView(event)
@@ -167,11 +180,13 @@ class Plot(pg.PlotItem):
                 link.vline.setPos(point.x())
         self.updateText()
 
+    # Slot for catching a range change
     def rangeChange(self):
         for text in self.milestoneTexts:
             text.setPos(text.pos().x(), self.viewRange()[1][0])
         self.updateText()
 
+    # Change range for date selection
     def setRange(self, start, end):
         if start is not None:
             self.setXRange(start, self.viewRange()[0][1])
@@ -179,6 +194,7 @@ class Plot(pg.PlotItem):
             self.setXRange(self.viewRange()[0][0], end)
 
 
+# Main window
 class Window(QtGui.QWidget):
 
     def __init__(self):
@@ -187,7 +203,7 @@ class Window(QtGui.QWidget):
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
 
-        # Need to put in authentication
+        # Need to put in authentication (token or user/pass)
         self.github = Github()
 
         print(self.github.rate_limiting)
@@ -201,6 +217,7 @@ class Window(QtGui.QWidget):
         # today = toUnix(datetime.today())
         self.layout = pg.GraphicsLayoutWidget(self)
 
+        # Plot to show total number of open issues
         self.issuesPlot = Plot(numCurves=1,
                                title="Issues",
                                labels={'left': "Number of Issues",
@@ -210,6 +227,7 @@ class Window(QtGui.QWidget):
         self.issuesPlot.scene().sigMouseMoved.connect(self.issuesPlot.mouseMoved)
         self.plots.append(self.issuesPlot)
 
+        # Plot to show total commits, classified as bugfixes or features
         self.commitsPlot = Plot(numCurves=2,
                                 title="Commits",
                                 labels={'left': "Number of Commits",
@@ -220,6 +238,7 @@ class Window(QtGui.QWidget):
         self.commitsPlot.link(self.issuesPlot)
         self.plots.append(self.commitsPlot)
 
+        # Plot to show additions and deletions
         self.linesPlot = Plot(numCurves=3,
                               title="Lines of Code",
                               labels={'left': "Number of Lines",
@@ -232,6 +251,7 @@ class Window(QtGui.QWidget):
         self.plots.append(self.linesPlot)
 
     def createUI(self):
+        # Line edit for entering repository
         self.repoEdit = QtGui.QLineEdit(self)
         self.repoStart = QtGui.QPushButton("Start", self)
         self.repoStart.clicked.connect(self.createRepo)
@@ -241,6 +261,7 @@ class Window(QtGui.QWidget):
         self.repoLabel = QtGui.QLabel(self)
         self.repoLabel.setText("Enter Repository:")
 
+        # Set date range
         self.startLabel = QtGui.QLabel(self)
         self.startLabel.setText("Start Date:")
         self.startDate = QtGui.QDateTimeEdit(self)
